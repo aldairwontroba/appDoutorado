@@ -67,6 +67,7 @@ class MyMethod : public QThread
 signals:
     void updateUI(const QString msg);
     void updatePlot();
+    void sendPyVector(QVector<float> x);
 
 public: //metodos publicos
     MyMethod(QObject *parent = nullptr, QVector<QVector<float>> *dados = nullptr,
@@ -198,6 +199,9 @@ private slots:
     void on_iniMetButon_clicked();
     void on_spButon_clicked();
     void on_tabWidget_currentChanged(int index);
+    void sendVectorPy(QVector<float> x);
+
+    void on_actionSet_svID_triggered();
 
 private:
     void creatPyConection();

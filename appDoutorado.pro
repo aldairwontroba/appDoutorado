@@ -1,4 +1,4 @@
-QT       += network core gui
+QT       += network core gui opengl
 
 LIBS += -LC:\Users\Aldair\GoogleDrive\Doutorado\PROJETOS\qtProjects\appDoutorado -liec61850
 LIBS += -LC:\Users\Aldair\GoogleDrive\Doutorado\PROJETOS\qtProjects\appDoutorado -lhal

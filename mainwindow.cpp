@@ -21,6 +21,10 @@ HANDLE hMapFile_py;
 HANDLE workHandle_py;
 HANDLE backHandle_py;
 
+QString svidref = "svpub1";
+int svReadtype = 0;
+float svMultiply = 0.01;
+
 /////////////////////////////////////////////////////////////////////////////
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow), plotTimer(new QTimer(this))
 {
@@ -80,6 +84,9 @@ MainWindow::~MainWindow()
     settings.setValue("geometry", saveGeometry());
     settings.setValue("windowState", saveState());
     settings.setValue("Interface", eht);
+    settings.setValue("svId", svidref);
+    settings.setValue("svReadtype", svReadtype);
+    settings.setValue("svMultiply", svMultiply);
     settings.endGroup();
 
     delete ui;
@@ -103,7 +110,15 @@ void MainWindow::restoreData()
     if (!state.isEmpty()) {
         restoreState(state);
     }
-
+    if (settings.contains("svId")){
+        svidref = settings.value("svId", QString()).toString();
+    }
+    if (settings.contains("svReadtype")){
+        svReadtype = settings.value("svReadtype", QByteArray()).toInt();
+    }
+    if (settings.contains("svMultiply")){
+        svMultiply = settings.value("svMultiply", QByteArray()).toFloat();
+    }
     if (settings.contains("Interface")){
         eht = settings.value("Interface", QString()).toString();
     }else{
@@ -221,27 +236,7 @@ void MainWindow::creatPyConection()
 
     if (workHandle_py == NULL || backHandle_py == NULL) return ui->textEdit->append("Erro no CreateEvent");
 
-    // Especifica o script Python a ser executado
-    QString scriptPath = "C:/Users/Aldair/GoogleDrive/Doutorado/PROJETOS/pyProjects/auxPyForDocPro/main.py";
 
-    // Define o vetor que você deseja passar para o script
-    QStringList arguments;
-    arguments.append(scriptPath);
-
-    process = new QProcess(this);
-    // Conectar o sinal finished ao slot onProcessFinished
-    connect(process, &QProcess::finished, this, &MainWindow::onProcessFinished);
-
-    // Inicia o processo Python
-    process->start("python", arguments);
-
-    if (process->waitForStarted()) {
-        // O processo foi iniciado com sucesso
-    } else {
-        // O processo não pôde ser iniciado, exibe uma mensagem de erro
-        QByteArray error = process->readAllStandardError();
-        qDebug() << "Erro ao iniciar o processo:" << error;
-    }
 }
 /////////////////////////////////////////////////////////////////////////////
 /// \brief Thread Handle
@@ -299,6 +294,8 @@ void MainWindow::on_iniMetButon_clicked()
 
         connect(fftTimer, &QTimer::timeout, myMethod, &MyMethod::onFftTimer);
 
+        connect(myMethod, &MyMethod::sendPyVector, this, &MainWindow::sendVectorPy);
+
         if(clientThread != nullptr)
         {
             fftTimer->start(8);
@@ -335,6 +332,40 @@ void MainWindow::on_tabWidget_currentChanged(int index)
 /////////////////////////////////////////////////////////////////////////////
 /// \brief MainWindow::onUpdateUI
 ///
+void MainWindow::sendVectorPy(QVector<float> x)
+{
+    creatPyConection();
+
+    if (!x.isEmpty() && x.size() <= 4096) {
+        // Copia os dados do QVector para o array stlIn
+        structPointerPy->len = x.size();
+        std::copy(x.begin(), x.end(), structPointerPy->stlIn);
+    } else {
+        // Lida com o caso em que o QVector está vazio ou ultrapassa o tamanho máximo
+        qDebug() << "fora do tamanho";
+    }
+    // Especifica o script Python a ser executado
+    QString scriptPath = "C:/Users/Aldair/GoogleDrive/Doutorado/PROJETOS/pyProjects/auxPyForDocPro/main.py";
+
+    // Define o vetor que você deseja passar para o script
+    QStringList arguments;
+    arguments.append(scriptPath);
+
+    process = new QProcess(this);
+    // Conectar o sinal finished ao slot onProcessFinished
+    connect(process, &QProcess::finished, this, &MainWindow::onProcessFinished);
+
+    // Inicia o processo Python
+    process->start("python", arguments);
+
+    if (process->waitForStarted()) {
+        // O processo foi iniciado com sucesso
+    } else {
+        // O processo não pôde ser iniciado, exibe uma mensagem de erro
+        QByteArray error = process->readAllStandardError();
+        qDebug() << "Erro ao iniciar o processo:" << error;
+    }
+}
 void MainWindow::onUpdateUI(const QString msg)
 {
     ui->textEdit->append(msg);
@@ -483,6 +514,7 @@ void MainWindow::updatePlot_m()
                 ui->customPlot2_m->graph(2)->addData(i, myMethod->bbv[h3h].at(i).BB_D);
                 ui->customPlot2_m->graph(3)->addData(i, myMethod->bbv[h3h].at(i).SMA_longa);
                 ui->customPlot2_m->graph(4)->addData(i, myMethod->bbv[h3h].at(i).SMA_curta);
+                ui->customPlot2_m->graph(5)->addData(i, myMethod->flags.f3h);
                 //ui->customPlot2_m->graph(5)->addData(len, fg);
             }
 
@@ -536,6 +568,66 @@ void MainWindow::on_actionCheck_Devices_triggered()
 void MainWindow::salvarTexto(const QString &texto)
 {
     eht = texto;
+}
+void MainWindow::on_actionSet_svID_triggered()
+{
+    QDialog *janela1 = new QDialog(this);
+    janela1->setObjectName("svID definition");
+    janela1->setWindowTitle("svID definition");
+    janela1->resize(366, 183);
+
+    QVBoxLayout *layout = new QVBoxLayout(janela1);
+
+    QLabel *label = new QLabel("Digite o svID:", janela1);
+    layout->addWidget(label);
+
+    QLineEdit *lineEdit = new QLineEdit(janela1);
+    lineEdit->setText(svidref);
+    layout->addWidget(lineEdit);
+
+    // Adicionando entrada numérica float
+    QLabel *floatLabel = new QLabel("Digite o Multiplicador do SV:", janela1);
+    layout->addWidget(floatLabel);
+
+    QDoubleSpinBox *doubleSpinBox = new QDoubleSpinBox(janela1);
+    doubleSpinBox->setDecimals(2); // Define a quantidade de casas decimais
+    doubleSpinBox->setMinimum(-1000000); // Defina o mínimo desejado, -1000 neste exemplo
+    doubleSpinBox->setMaximum(1000000); // Defina o máximo desejado, 1000 neste exemplo
+    doubleSpinBox->setValue(1.0/svMultiply);
+    layout->addWidget(doubleSpinBox);
+
+    // Adicionando caixa de seleção
+    QLabel *comboBoxLabel = new QLabel("Selecione o tipo de entrada:", janela1);
+    layout->addWidget(comboBoxLabel);
+
+    QComboBox *comboBox = new QComboBox(janela1);
+    comboBox->addItem("int");
+    comboBox->addItem("float");
+    comboBox->setCurrentIndex(svReadtype);
+    layout->addWidget(comboBox);
+
+    QPushButton *okButton = new QPushButton("OK", janela1);
+    QPushButton *cancelButton = new QPushButton("Cancelar", janela1);
+    layout->addWidget(okButton);
+    layout->addWidget(cancelButton);
+
+    // Conectar o sinal de clique do botão OK para aceitar o diálogo
+    connect(okButton, &QPushButton::clicked, [this, lineEdit, doubleSpinBox, comboBox, janela1]() {
+        svidref = lineEdit->text();
+        svMultiply = 1.0/doubleSpinBox->value();
+        svReadtype = comboBox->currentIndex();
+        this->ui->textEdit->append(QString("svID setado para: %1").arg(svidref));
+        this->ui->textEdit->append(QString("Número float digitado: %1").arg(doubleSpinBox->value()));
+        this->ui->textEdit->append(QString("Tipo selecionado: %1").arg(comboBox->itemText(svReadtype)));
+        janela1->accept();
+    });
+
+    connect(cancelButton, &QPushButton::clicked, [janela1]() {
+        janela1->close();
+    });
+
+    janela1->show();
+
 }
 /////////////////////////////////////////////////////////////////////////////
 /// \brief ClientThread::ClientThread
@@ -598,45 +690,63 @@ void ClientThread::run()
 }
 void ClientThread::svUpdateListener(SVSubscriber subscriber, void *parameter, SVSubscriber_ASDU asdu)
 {
-    static bool ini = true;
     static int lastcount = 0;
+    static QStringList svIdList;
     int count = 0;
 
     ClientThread *instance = static_cast<ClientThread*>(parameter);
     QVector<float> vetor;
     vetor.resize(8);
-    if (ini)
-    {
-        ini = false;
-        const char* svID = SVSubscriber_ASDU_getSvId(asdu);
+    QString svID = QString::fromUtf8(SVSubscriber_ASDU_getSvId(asdu));
 
-        if (svID != NULL) emit instance->updateUI(QString("svID=(%1)\n").arg(svID));
+    if(!svIdList.contains(svID))
+    {
+        svIdList << svID;
+        emit instance->updateUI(QString("svID=(%1)\n").arg(svID));
 
         emit instance->updateUI(QString("smpCnt: %1").arg(SVSubscriber_ASDU_getSmpCnt(asdu)));
         emit instance->updateUI(QString("confRev: %1").arg(SVSubscriber_ASDU_getConfRev(asdu)));
         //emit instance->updateUI(QString("Sample Rate: %1\n").arg(SVSubscriber_ASDU_getSmpRate(asdu)));
         //emit instance->updateUI(QString("Size in Bytes: %1\n").arg(SVSubscriber_ASDU_getDataSize(asdu)));
     }
-    count = SVSubscriber_ASDU_getConfRev(asdu);
-    if (count > lastcount + 1){
-        instance->lossPacket = instance->lossPacket + count - (lastcount + 1);
-    }
-    lastcount = count;
+    if (svidref.compare(svID) == 0){
 
-    if (SVSubscriber_ASDU_getDataSize(asdu) >= 40) {
-        vetor[0] = SVSubscriber_ASDU_getFLOAT32(asdu, 0);
-        vetor[1] = SVSubscriber_ASDU_getFLOAT32(asdu, 4);
-        vetor[2] = SVSubscriber_ASDU_getFLOAT32(asdu, 8);
-        vetor[3] = SVSubscriber_ASDU_getFLOAT32(asdu, 12);
-        vetor[4] = SVSubscriber_ASDU_getFLOAT32(asdu, 16);
-        vetor[5] = SVSubscriber_ASDU_getFLOAT32(asdu, 20);
-        vetor[6] = SVSubscriber_ASDU_getFLOAT32(asdu, 24);
-        vetor[7] = SVSubscriber_ASDU_getFLOAT32(asdu, 28);
+        count = SVSubscriber_ASDU_getSmpCnt(asdu);
+        if (count > lastcount + 1){
+            instance->lossPacket = instance->lossPacket + count - (lastcount + 1);
+        }
+        lastcount = count;
+        Timestamp tempo;
 
-        Timestamp tempo = SVSubscriber_ASDU_getTimestamp(asdu, 32);
+        if(svReadtype == 1){
+            vetor[0] = SVSubscriber_ASDU_getFLOAT32(asdu, 0);
+            vetor[1] = SVSubscriber_ASDU_getFLOAT32(asdu, 8);
+            vetor[2] = SVSubscriber_ASDU_getFLOAT32(asdu, 16);
+            vetor[3] = SVSubscriber_ASDU_getFLOAT32(asdu, 24);
+            vetor[4] = SVSubscriber_ASDU_getFLOAT32(asdu, 32);
+            vetor[5] = SVSubscriber_ASDU_getFLOAT32(asdu, 40);
+            vetor[6] = SVSubscriber_ASDU_getFLOAT32(asdu, 48);
+            vetor[7] = SVSubscriber_ASDU_getFLOAT32(asdu, 56);
+        }else{
+            vetor[0] = (float)SVSubscriber_ASDU_getINT32(asdu, 0) * svMultiply;
+            vetor[1] = (float)SVSubscriber_ASDU_getINT32(asdu, 8) * svMultiply;
+            vetor[2] = (float)SVSubscriber_ASDU_getINT32(asdu, 16) * svMultiply;
+            vetor[3] = (float)SVSubscriber_ASDU_getINT32(asdu, 24) * svMultiply;
+            vetor[4] = (float)SVSubscriber_ASDU_getINT32(asdu, 32) * svMultiply;
+            vetor[5] = (float)SVSubscriber_ASDU_getINT32(asdu, 40) * svMultiply;
+            vetor[6] = (float)SVSubscriber_ASDU_getINT32(asdu, 48) * svMultiply;
+            vetor[7] = (float)SVSubscriber_ASDU_getINT32(asdu, 56) * svMultiply;
+        }
 
+
+        if (SVSubscriber_ASDU_getDataSize(asdu) > 64) {
+            tempo = SVSubscriber_ASDU_getTimestamp(asdu, 64);
+        }else{
+            Timestamp_setTimeInNanoseconds(&tempo, Hal_getTimeInNs());
+        }
         emit instance->updateData(vetor, tempo);
     }
+
 }
 /////////////////////////////////////////////////////////////////////////////
 /// \brief MyMethod::MyMethod
@@ -918,18 +1028,9 @@ void MyMethod::onFftTimer()
     {
         static float SMA_curta_V_3hLast = 0;
 
-        static int BB_U_min_prev_3h = 0;
-        static int BB_U_max_prev_3h = 0;
-        static int BB_D_min_prev_3h = 0;
-        static int BB_D_max_prev_3h = 0;
-        static int SMA_longa_min_prev_3h = 0;
-        static int SMA_longa_max_prev_3h = 0;
-        static int BB_U_min = 0;
-        static int BB_U_max = 0;
-        static int BB_D_min = 0;
-        static int BB_D_max = 0;
-        static int SMA_longa_min = 0;
-        static int SMA_longa_max = 0;
+        static float BB_U_max_prev_3h = 0;
+        static float BB_D_min_prev_3h = 0;
+
 
         //----------------Calcula medias-------------------
 
@@ -991,12 +1092,12 @@ void MyMethod::onFftTimer()
             count.Position_flag_3h = ifft;
             count.count_BB_abaixo_amplitude = 0;
 
-            BB_U_min_prev_3h = bbp[h3h].BB_U;
-            BB_U_max_prev_3h = bbp[h3h].BB_U;
-            BB_D_min_prev_3h = bbp[h3h].BB_D;
-            BB_D_max_prev_3h = bbp[h3h].BB_D;
-            SMA_longa_min_prev_3h = bbp[h3h].SMA_longa;
-            SMA_longa_max_prev_3h = bbp[h3h].SMA_longa;
+            float BB_U_min_prev_3h = bbp[h3h].BB_U;
+            float BB_U_max_prev_3h = bbp[h3h].BB_U;
+            float BB_D_min_prev_3h = bbp[h3h].BB_D;
+            float BB_D_max_prev_3h = bbp[h3h].BB_D;
+            float SMA_longa_min_prev_3h = bbp[h3h].SMA_longa;
+            float SMA_longa_max_prev_3h = bbp[h3h].SMA_longa;
 
             for (int j = ifft; j > ifft-60; j--){
                 if (BB_U_min_prev_3h > bbv[h3h].at(j).BB_U)
@@ -1022,14 +1123,14 @@ void MyMethod::onFftTimer()
         if (flags.f3h){
             tmax_flag_3h = tmax_flag_3h + 1;
 
-            if (X_Der_M_curta3h > 0.1) flags.var_derivada = true;
+            //if (X_Der_M_curta3h > 0.1) flags.var_derivada = true;
 
-            BB_U_min = bbp[h3h].BB_U;
-            BB_U_max = bbp[h3h].BB_U;
-            BB_D_min = bbp[h3h].BB_D;
-            BB_D_max = bbp[h3h].BB_D;
-            SMA_longa_min = bbp[h3h].SMA_longa;
-            SMA_longa_max = bbp[h3h].SMA_longa;
+            float BB_U_min = bbp[h3h].BB_U;
+            float BB_U_max = bbp[h3h].BB_U;
+            float BB_D_min = bbp[h3h].BB_D;
+            float BB_D_max = bbp[h3h].BB_D;
+            float SMA_longa_min = bbp[h3h].SMA_longa;
+            float SMA_longa_max = bbp[h3h].SMA_longa;
 
             for (int j = ifft; j > ifft-150; j--){
                 if (BB_U_min > bbv[h3h].at(j).BB_U)
@@ -1059,8 +1160,8 @@ void MyMethod::onFftTimer()
             }else{
                 flags.var_estavel_amplitude_3h = false;
             }
-
-            if ( (BB_U_max-BB_D_min) < 0.005 ){
+            //qDebug() << BB_U_max << BB_D_min;
+            if ( (BB_U_max-BB_D_min) < 0.01 ){
                 flags.var_abaixo_amplitude_3h = true;
                 //var_estavel_amplitude_3h_V(i) = 1.3;
             }else{
@@ -1072,15 +1173,23 @@ void MyMethod::onFftTimer()
                 flags.Var_End_flag_3h = true;
                 //Var_End_flagM_3h(i) = 1;
                 flags.f3h = false;
-                // if (Position_flag_3h_end == FT_si){
+                //qDebug() << BB_U_max << BB_D_min << ifft;
+                //qDebug() << flags.var_estavel_direcao_3h << flags.var_estavel_amplitude_3h << flags.var_abaixo_amplitude_3h << tmax_flag_3h << flags.var_derivada;
+                //if (Position_flag_3h_end == FT_si){
                 //     Position_flag_3h_end = i-10;
                 // }
+                QVector<float> x;
+                for (int i = count.Position_flag_3h; i < ifft; i++)
+                {
+                    x.append(modulo_predict[h3h].at(i));
+                }
+                emit sendPyVector(x);
             }
 
         }else{
             //Var_End_flagM_3h(i) = 0;
         }
-        //if (Var_End_flag_3h == 1) flag_efetivo_3h_V(i-10) = 0;
+        //if (flags.Var_End_flag_3h == 1) flag_efetivo_3h_V = 0;
 
     }
 
@@ -1253,6 +1362,9 @@ float MyMethod::mediadafase(float phase, float faseM, float divisor){
 
     return conv_m;
 }
+
+
+
 
 
 
