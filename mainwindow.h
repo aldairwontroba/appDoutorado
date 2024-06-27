@@ -1,6 +1,7 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include "qdatetime.h"
 #include <QMainWindow>
 #include <QTextEdit>
 #include <QDebug>
@@ -12,6 +13,8 @@
 #include <QFile>
 #include <QtMath>
 #include <QProcess>
+#include <QRandomGenerator>
+#include <QMutex>
 
 #define HAVE_REMOTE
 
@@ -67,17 +70,20 @@ class MyMethod : public QThread
 signals:
     void updateUI(const QString msg);
     void updatePlot();
-    void sendPyVector(QVector<float> x);
+    void sendPyVector(int tipo, float h1hM, float h1aM, float h3hM, float h3aM,
+                      QVector<float> x1, QVector<float> x2, QVector<float> x3,
+                      quint64 dataIndex, int p1, int p3);
 
-public: //metodos publicos
+public:
     MyMethod(QObject *parent = nullptr, QVector<QVector<float>> *dados = nullptr,
              QVector<quint64> *dadosTempo = nullptr, quint64 *lastIndex = nullptr,
              int fftLW = 1, int srate = 80, float freq = 60, int faseRef = 4);
 
     void setVarList(QList<int> hrL, QList<int> chL){harmList = hrL; chList = chL;}
 
-private: //funções privadas
+private:
     void run() override;
+
     QVector<float> pol2cart(float th, float r);
     QVector<float> cart2pol(float x, float y);
     float abs(float x);
@@ -87,13 +93,14 @@ private: //funções privadas
     float phase_biuld(int harm, float fftAref, float fftA);
     QVector<float> fft_complete(int ch, int harm, quint64 lastIndex);
 
+    void sendDataPy(int x, quint64 ifft, quint64 dataIndex);
+
 public slots:
     void onFftTimer();
 
 private: //variaveis da classe
     QVector<float> Cfc[hN], Cfs[hN]; //matriz da FFT
     float fftModulo[cN][hN], fftAngulo[cN][hN], phaseAngulo[cN][hN]; //matriz instantanea
-    float BB_U_1h_prev, BB_D_1h_prev, X_Der_M_curta3h;
 
     struct constante{
         int FFTLenWindow;
@@ -116,22 +123,20 @@ public:
     QList<int> harmList, chList;
     QVector<float> fftData[cN][hN], phaseData[cN][hN]; //modulo e angulo vetor
     QVector<float> angulo_M[2], modulo_M[2], angulo_predict[2], modulo_predict[2];
-    QVector<float> Buildup_temp, Buildup, Angulo_3h_ref1h, porcentagem, BB_sdp_Media;
+    QVector<float> Angulo_3h_ref1h;
 
     QVector<BB> bbv[2];
 
     struct flag{
         bool f1h;
         bool f3h;
-        bool Var_M_flag_1h;
-        bool Var_B_flag_1h;
-        bool Var_End_flag_1h;
-        bool Var_End_flag_3h;
-        bool Save_buildup_flag;
-        bool Var_BD_flag_3h;
-        bool Var_B_flag_3h;
-        bool flag_capturar_3h;
-        bool var_derivada;
+        bool h1h_lenta;
+        bool h1h_rapida;
+        bool h3h_lenta;
+        bool h3h_rapida;
+        bool var_estavel_direcao_1h;
+        bool var_estavel_amplitude_1h;
+        bool var_abaixo_amplitude_1h;
         bool var_estavel_direcao_3h;
         bool var_estavel_amplitude_3h;
         bool var_abaixo_amplitude_3h;
@@ -139,15 +144,19 @@ public:
     flag flags;
 
     struct contador{
-        int Var_MM_count_1h;
-        int Var_BU_count_1h ;
-        int flag_1h_position;
-        int count_break_1h;
-        int Var_BU_count_3h;
-        int Position_flag_3h;
-        int count_BB_abaixo_amplitude;
+        int h1h_rapida;
+        int h1h_lenta;
+        int h1h_position;
+        int break_1h;
+        int h3h_rapida;
+        int h3h_lenta;
+        int h3h_position;
+        int t_h1h;
+        int t_h3h;
     };
     contador count;
+    bool trigger_flag = true;
+    qint64 indexdata;
 };
 
 /////////////////////////////////////////////////////////////////////////////
@@ -176,6 +185,8 @@ public:
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
+signals:
+    void amostragem();
 
 public:
     MainWindow(QWidget *parent = nullptr);
@@ -199,9 +210,18 @@ private slots:
     void on_iniMetButon_clicked();
     void on_spButon_clicked();
     void on_tabWidget_currentChanged(int index);
-    void sendVectorPy(QVector<float> x);
+    void sendVectorPy(int tipo, float h1hM, float h1aM, float h3hM, float h3aM,
+                      QVector<float> x1, QVector<float> x2, QVector<float> x3, quint64 dataIndex, int p1, int p3);
 
     void on_actionSet_svID_triggered();
+
+    float calculateMean(const QVector<float>& vec);
+    float calculatePower(const QVector<float>& vec);
+    float calAWGN(QVector<float>& vec, float snr_dB);
+
+    void on_actionget_desault_triggered();
+
+    void on_actionSNR_triggered();
 
 private:
     void creatPyConection();
@@ -214,7 +234,7 @@ public:
     QString eht = "3";
     QTimer *plotTimer;    // Timer para atualização do gráfico
     QTimer *plotTimer_m;
-    QTimer *fftTimer;
+    QMutex mutex;
 
     QVector<QVector<float>> data; //dados de tensao e corrente
     QVector<quint64> dataTime; //respectivos tempos
@@ -224,6 +244,9 @@ private:
     int SRate = 0;
     double freq = 0;
     double stepTime = 0;
+    double stdDeviation[8] = {1,1,1,1,1,1,1,1};
+    QRandomGenerator generator;
+    float dBsnr = 60;
 
 };
 #endif // MAINWINDOW_H

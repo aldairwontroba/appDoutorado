@@ -82,7 +82,7 @@
              </rect>
             </property>
             <property name="text">
-             <string>PAUSE</string>
+             <string>Reset</string>
             </property>
            </widget>
            <widget class="QLineEdit" name="lineEdit">
@@ -317,7 +317,16 @@
     <addaction name="separator"/>
     <addaction name="actionSet_svID"/>
    </widget>
+   <widget class="QMenu" name="menuAWGN">
+    <property name="title">
+     <string>AWGN</string>
+    </property>
+    <addaction name="actionSNR"/>
+    <addaction name="actionget_desault"/>
+    <addaction name="actionRuido"/>
+   </widget>
    <addaction name="menuSettings"/>
+   <addaction name="menuAWGN"/>
   </widget>
   <action name="actioninit">
    <property name="text">
@@ -342,6 +351,24 @@
   <action name="actionSet_svID">
    <property name="text">
     <string>Set svID</string>
+   </property>
+  </action>
+  <action name="actionSNR">
+   <property name="text">
+    <string>SNR</string>
+   </property>
+  </action>
+  <action name="actionget_desault">
+   <property name="text">
+    <string>get desault</string>
+   </property>
+  </action>
+  <action name="actionRuido">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Ruido</string>
    </property>
   </action>
  </widget>

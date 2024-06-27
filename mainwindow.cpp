@@ -5,11 +5,17 @@
 /// Variaveis globais
 ///
 struct myPyStruct{
-    int len;
-    float stlIn[4096];
-    float stlT[4096];
-    float stlS[4096];
-    float stlR[4096];
+    int tipo;
+    int lenpos;
+    int lensig;
+    float h1h_M;
+    float h1a_M;
+    float h3h_M;
+    float h3a_M;
+    float pyh1h[4096];
+    float pyh3h[4096];
+    float pyh3a[4096];
+    float signal[40*4096];
 };
 myPyStruct *structPointerPy;
 
@@ -56,7 +62,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     // Conecte o timer para atualizar o gráfico
     plotTimer = new QTimer(this);
     plotTimer_m = new QTimer(this);
-    fftTimer = new QTimer(this);
 
     connect(plotTimer, &QTimer::timeout, this, &MainWindow::updatePlot);
 
@@ -166,9 +171,11 @@ void MainWindow::graficSetting()
     ui->customPlot1->yAxis->setRange(-1, 1);  // Ajuste conforme necessário
 
     ui->customPlot2->addGraph(); // Gráfico 1
+    ui->customPlot2->addGraph(); // Gráfico 1
     ui->customPlot2->graph(0)->setPen(customPen1);
+    ui->customPlot2->graph(1)->setPen(customPen2);
     ui->customPlot2->xAxis->setLabel("Tempo");
-    ui->customPlot2->yAxis->setLabel("IN");
+    ui->customPlot2->yAxis->setLabel("Corrente");
     ui->customPlot2->yAxis->setRange(-1, 1);  // Ajuste conforme necessário
 
     ///// grafico 2 Metodo
@@ -181,9 +188,12 @@ void MainWindow::graficSetting()
     ui->customPlot_m->graph(1)->setPen(customPen2); // Configurar as propriedades do Gráfico 2
     ui->customPlot_m->graph(2)->setPen(customPen3); // Configurar as propriedades do Gráfico 3
     ui->customPlot_m->xAxis->setLabel("Tempo");
-    ui->customPlot_m->yAxis->setLabel("Tensão");
+    ui->customPlot_m->yAxis->setLabel("Flag");
     ui->customPlot_m->yAxis->setRange(-1, 1);  // Ajuste conforme necessário
 
+    ui->customPlot1_m->addGraph(); // Gráfico 1
+    ui->customPlot1_m->addGraph(); // Gráfico 2
+    ui->customPlot1_m->addGraph(); // Gráfico 3
     ui->customPlot1_m->addGraph(); // Gráfico 1
     ui->customPlot1_m->addGraph(); // Gráfico 2
     ui->customPlot1_m->addGraph(); // Gráfico 3
@@ -191,8 +201,11 @@ void MainWindow::graficSetting()
     ui->customPlot1_m->graph(0)->setPen(customPen1); // Configurar as propriedades do Gráfico 1
     ui->customPlot1_m->graph(1)->setPen(customPen2); // Configurar as propriedades do Gráfico 2
     ui->customPlot1_m->graph(2)->setPen(customPen3); // Configurar as propriedades do Gráfico 3
+    ui->customPlot1_m->graph(3)->setPen(customPen4);
+    ui->customPlot1_m->graph(4)->setPen(customPen5);
+    ui->customPlot1_m->graph(5)->setPen(customPen6);
     ui->customPlot1_m->xAxis->setLabel("Tempo");
-    ui->customPlot1_m->yAxis->setLabel("Corrente");
+    ui->customPlot1_m->yAxis->setLabel("h1h");
     ui->customPlot1_m->yAxis->setRange(-1, 1);  // Ajuste conforme necessário
 
     ui->customPlot2_m->addGraph(); // Gráfico 1
@@ -208,7 +221,7 @@ void MainWindow::graficSetting()
     ui->customPlot2_m->graph(4)->setPen(customPen5);
     ui->customPlot2_m->graph(5)->setPen(customPen6);
     ui->customPlot2_m->xAxis->setLabel("Tempo");
-    ui->customPlot2_m->yAxis->setLabel("IN");
+    ui->customPlot2_m->yAxis->setLabel("h3h");
     ui->customPlot2_m->yAxis->setRange(-1, 1);  // Ajuste conforme necessário
 }
 /////////////////////////////////////////////////////////////////////////////
@@ -257,6 +270,8 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
     qDebug() << "Status de saída:" << exitStatus;
     QByteArray result = process->readAllStandardOutput();
     qDebug() << "Saidas: " << result;
+    QByteArray error = process->readAllStandardError();
+    qDebug() << "Erro Python:" << error;
 }
 /////////////////////////////////////////////////////////////////////////////
 /// \brief Button and stuffs
@@ -289,16 +304,13 @@ void MainWindow::on_iniMetButon_clicked()
         connect(myMethod, &MyMethod::finished, myMethod, &MyMethod::deleteLater);
         connect(myMethod, &MyMethod::destroyed, this, &MainWindow::onThreadDestroyed);
         connect(myMethod, &MyMethod::updateUI, this, &MainWindow::onUpdateUI);
-
         connect(plotTimer_m, &QTimer::timeout, this, &MainWindow::updatePlot_m);
-
-        connect(fftTimer, &QTimer::timeout, myMethod, &MyMethod::onFftTimer);
 
         connect(myMethod, &MyMethod::sendPyVector, this, &MainWindow::sendVectorPy);
 
         if(clientThread != nullptr)
         {
-            fftTimer->start(8);
+            connect(this, &MainWindow::amostragem, myMethod, &MyMethod::onFftTimer);
             plotTimer_m->start(200);
         }
         else ui->textEdit->append("Monitoramento do SV não esta habilitado!\n");
@@ -308,15 +320,14 @@ void MainWindow::on_iniMetButon_clicked()
         ui->iniMetButon->setText("Parar o Metodo");
 
     }else{
-        disconnect(fftTimer, &QTimer::timeout, myMethod, &MyMethod::onFftTimer);
+        disconnect(this, &MainWindow::amostragem, myMethod, &MyMethod::onFftTimer);
         plotTimer_m->stop();
-        fftTimer->stop();
         myMethod->requestInterruption();
     }
 }
 void MainWindow::on_spButon_clicked()
 {
-    creatPyConection();
+    if(myMethod != nullptr) myMethod->trigger_flag = true;
 }
 void MainWindow::on_tabWidget_currentChanged(int index)
 {
@@ -329,23 +340,112 @@ void MainWindow::on_tabWidget_currentChanged(int index)
         plotTimer->start(50);
     }
 }
+void MainWindow::on_actionSNR_triggered()
+{
+    bool ok;
+    dBsnr = QInputDialog::getDouble(nullptr, "Digite um valor", "Digite o SNR:", dBsnr, -9999999.0, 9999999.0, 2, &ok);
+
+    // Verificar se o usuário pressionou OK e inseriu um valor válido
+    if (ok) {
+        qDebug() << "Valor inserido:" << dBsnr;
+    } else {
+        qDebug() << "Operação cancelada pelo usuário.";
+    }
+}
+/////////////////////////////////////////////////////////////////////////////
+/// \brief MainWindow::onCalculate
+///
+float MainWindow::calculateMean(const QVector<float>& vec) {
+    float sum = 0.0;
+    for (const auto& value : vec) {
+        sum += value;
+    }
+    return sum / vec.size();
+}
+
+// Função para calcular a potência de um QVector
+float MainWindow::calculatePower(const QVector<float>& vec)
+{
+    float sumOfSquares = 0.0;
+    for (const auto& value : vec) {
+        sumOfSquares += value * value;
+    }
+    return sumOfSquares / vec.size();
+}
+
+// Função para adicionar ruído AWGN ao QVector
+float MainWindow::calAWGN(QVector<float>& vec, float snr_dB)
+{
+    // Converter SNR de dB para uma relação linear
+    float snr_linear = std::pow(10, snr_dB / 10.0);
+
+    // Calcular a potência do sinal
+    float signalPower = calculatePower(vec);
+
+    // Calcular a potência do ruído
+    float noisePower = signalPower / snr_linear;
+
+    // Calcular o desvio padrão do ruído
+    return std::sqrt(noisePower);
+}
+void MainWindow::on_actionget_desault_triggered()
+{
+    QVector<float> last100Elements = data[0].mid(data[0].size() - 160);
+    stdDeviation[0] = calAWGN(last100Elements, dBsnr);
+    qDebug() << stdDeviation[0];
+    last100Elements = data[1].mid(data[1].size() - 160);
+    stdDeviation[1] = calAWGN(last100Elements, dBsnr);
+    qDebug() << stdDeviation[1];
+    last100Elements = data[2].mid(data[2].size() - 160);
+    stdDeviation[2] = calAWGN(last100Elements, dBsnr);
+    qDebug() << stdDeviation[2];
+    last100Elements = data[3].mid(data[3].size() - 160);
+    stdDeviation[3] = calAWGN(last100Elements, dBsnr);
+    qDebug() << stdDeviation[3];
+    last100Elements = data[4].mid(data[4].size() - 160);
+    stdDeviation[4] = calAWGN(last100Elements, dBsnr);
+    qDebug() << stdDeviation[4];
+    last100Elements = data[5].mid(data[5].size() - 160);
+    stdDeviation[5] = calAWGN(last100Elements, dBsnr);
+    qDebug() << stdDeviation[5];
+    last100Elements = data[6].mid(data[6].size() - 160);
+    stdDeviation[6] = calAWGN(last100Elements, dBsnr);
+    qDebug() << stdDeviation[6];
+
+}
 /////////////////////////////////////////////////////////////////////////////
 /// \brief MainWindow::onUpdateUI
 ///
-void MainWindow::sendVectorPy(QVector<float> x)
+void MainWindow::sendVectorPy(int tipo, float h1hM, float h1aM, float h3hM, float h3aM,
+                              QVector<float> x1, QVector<float> x2, QVector<float> x3, quint64 dataIndex, int p1, int p3)
 {
     creatPyConection();
 
-    if (!x.isEmpty() && x.size() <= 4096) {
-        // Copia os dados do QVector para o array stlIn
-        structPointerPy->len = x.size();
-        std::copy(x.begin(), x.end(), structPointerPy->stlIn);
-    } else {
-        // Lida com o caso em que o QVector está vazio ou ultrapassa o tamanho máximo
-        qDebug() << "fora do tamanho";
+    structPointerPy->tipo = tipo;
+    structPointerPy->h1a_M = h1aM;
+    structPointerPy->h1h_M = h1hM;
+    structPointerPy->h3a_M = h3aM;
+    structPointerPy->h3h_M = h3hM;
+    structPointerPy->lenpos = p1;
+    structPointerPy->lensig = p3;
+    int len = 40*4096;
+
+    QVector<float> xs;
+    xs.resize(len);
+    for(int i = 0; i > -len; i--){
+        if(i >= -dataIndex)
+            xs[len+i-1] = data[In].at(dataIndex+i);
+        else
+            xs[len+i-1] = 0;
     }
+    std::copy(x1.begin(), x1.end(), structPointerPy->pyh1h);
+    std::copy(x2.begin(), x2.end(), structPointerPy->pyh3h);
+    std::copy(x3.begin(), x3.end(), structPointerPy->pyh3a);
+    std::copy(xs.begin(), xs.end(), structPointerPy->signal);
+
     // Especifica o script Python a ser executado
-    QString scriptPath = "C:/Users/Aldair/GoogleDrive/Doutorado/PROJETOS/pyProjects/auxPyForDocPro/main.py";
+    //QString scriptPath = "C:/Users/Aldair/GoogleDrive/Doutorado/PROJETOS/pyProjects/auxPyForDocPro/main.py";
+    QString scriptPath = "C:/Users/Aldair/GoogleDrive/Doutorado/PROJETOS/pyProjects/auxPyForDoc_alg/main.py";
 
     // Define o vetor que você deseja passar para o script
     QStringList arguments;
@@ -372,14 +472,47 @@ void MainWindow::onUpdateUI(const QString msg)
 }
 void MainWindow::onUpdateData(const QVector<float> &vetor, const Timestamp &tempo)
 {
-    data[0].append(vetor[0]);
-    data[1].append(vetor[1]);
-    data[2].append(vetor[2]);
-    data[3].append(vetor[3]);
-    data[4].append(vetor[4]);
-    data[5].append(vetor[5]);
-    data[6].append(vetor[6]);
-    data[7].append(vetor[7]);
+    if(ui->actionRuido->isChecked())
+    {
+        double noise = (generator.generateDouble()*2 - 1)*stdDeviation[0];
+        //float x = vetor[0] + noise;
+        data[0].append(vetor[0] + noise);
+
+        noise = (generator.generateDouble()*2 - 1)*stdDeviation[1];
+        //x += vetor[1] + noise;
+        data[1].append(vetor[1] + noise);
+
+        noise = (generator.generateDouble()*2 - 1)*stdDeviation[2];
+        //x += vetor[2] + noise;
+        data[2].append(vetor[2] + noise);
+
+        noise = (generator.generateDouble()*2 - 1)*stdDeviation[3];
+        //data[3].append(x);
+        data[3].append(vetor[3] + noise);
+
+        noise = (generator.generateDouble()*2 - 1)*stdDeviation[4];
+        data[4].append(vetor[4] + noise);
+
+        noise = (generator.generateDouble()*2 - 1)*stdDeviation[5];
+        data[5].append(vetor[5] + noise);
+
+        noise = (generator.generateDouble()*2 - 1)*stdDeviation[6];
+        data[6].append(vetor[6] + noise);
+
+        noise = (generator.generateDouble()*2 - 1)*stdDeviation[7];
+        data[7].append(vetor[7] + noise);
+    }
+    else
+    {
+        data[0].append(vetor[0]);
+        data[1].append(vetor[1]);
+        data[2].append(vetor[2]);
+        data[3].append(vetor[3]);
+        data[4].append(vetor[4]);
+        data[5].append(vetor[5]);
+        data[6].append(vetor[6]);
+        data[7].append(vetor[7]);
+    }
 
     quint64 t = Timestamp_getTimeInNs(const_cast<Timestamp*>(&tempo));
     dataTime.append(t);
@@ -389,6 +522,7 @@ void MainWindow::onUpdateData(const QVector<float> &vetor, const Timestamp &temp
     /// ref a tensao na fase A
     static float vaLast = 0.1;
     static qint64 zCrosLast = 0;
+    static int count = 0;
     if(vetor[4] > 0 && vaLast <= 0)
     {
         SRate = data[4].size() - zCrosLast;
@@ -398,6 +532,13 @@ void MainWindow::onUpdateData(const QVector<float> &vetor, const Timestamp &temp
         //qDebug() << stepTime;
     }
     vaLast = vetor[4];
+    if(count >= 40){
+        count = 0;
+        emit amostragem();
+    }else{
+        count++;
+    }
+
 }
 void MainWindow::updatePlot()
 {
@@ -447,13 +588,14 @@ void MainWindow::updatePlot()
                 ui->customPlot1->graph(2)->addData(i, data[2].at(i));
 
                 ui->customPlot2->graph(0)->addData(i, data[3].at(i));
+                ui->customPlot2->graph(1)->addData(i, data[0].at(i)+data[1].at(i)+data[2].at(i));
             }
             // Rescale e replot
             ui->customPlot->yAxis->setRange(minG1, maxG1);
             ui->customPlot->xAxis->setRange(len, 500, Qt::AlignRight);
             ui->customPlot1->yAxis->setRange(minG2, maxG2);
             ui->customPlot1->xAxis->setRange(len, 500, Qt::AlignRight);
-            ui->customPlot2->yAxis->setRange(minG3, maxG3);
+            ui->customPlot2->yAxis->setRange(minG3-0.5, maxG3+0.5);
             ui->customPlot2->xAxis->setRange(len, 500, Qt::AlignRight);
 
             ui->customPlot->replot(); //V
@@ -468,15 +610,24 @@ void MainWindow::updatePlot()
     ui->lcd_freq->display(freq);
     ui->lcdAmostral->display(stepTime);
 }
+// Função para encontrar o menor e o maior valor dentro dos últimos 2000 elementos de um vetor de dados
+void findMinMax(const QVector<float>& data, int startIndex, int endIndex, double& minValue, double& maxValue) {
+    endIndex = qMin(endIndex, data.size() - 1);
+    minValue = data[startIndex];
+    maxValue = data[startIndex];
+
+    for (int i = startIndex + 1; i <= endIndex; ++i) {
+        minValue = qMin(minValue, data[i]);
+        maxValue = qMax(maxValue, data[i]);
+    }
+}
 void MainWindow::updatePlot_m()
 {
     static int len = 0;
-    static float maxG1 = 0;
-    static float maxG2 = 0;
-    static float maxG3 = 0;
-    static float minG1 = 0;
-    static float minG2 = 0;
-    static float minG3 = 0;
+    static double maxG1 = 0;
+    static double maxG2 = 0;
+    static double minG1 = 0;
+    static double minG2 = 0;
     int increment = 1;
     int size = 0;
 
@@ -485,50 +636,43 @@ void MainWindow::updatePlot_m()
         size = myMethod->fftData[In][harm3].size();
         increment = size - len;
         if (increment > 0){
+
             for(int i=len; i<size; i++)
             {
-                if(myMethod->fftData[Ia][harm1].at(i) > maxG1) maxG1 = myMethod->fftData[Ia][harm1].at(i);
-                if(myMethod->fftData[Ib][harm1].at(i) > maxG1) maxG1 = myMethod->fftData[Ib][harm1].at(i);
-                if(myMethod->fftData[Ic][harm1].at(i) > maxG1) maxG1 = myMethod->fftData[Ic][harm1].at(i);
+                ui->customPlot_m->graph(0)->addData(i, myMethod->flags.f3h);
+                ui->customPlot_m->graph(1)->addData(i, myMethod->flags.f1h*1.2);
 
-                if(myMethod->fftData[In][harm1].at(i) > maxG2) maxG2 = myMethod->fftData[In][harm1].at(i);
-                if(myMethod->fftData[In][harm3].at(i) > maxG2) maxG2 = myMethod->fftData[In][harm3].at(i);
-                if(myMethod->fftData[In][harm5].at(i) > maxG2) maxG2 = myMethod->fftData[In][harm5].at(i);
+                //ui->customPlot1_m->graph(0)->addData(i, myMethod->fftData[In][harm1].at(i));
+                ui->customPlot1_m->graph(0)->addData(i, myMethod->modulo_predict[h1h].at(i));
+                ui->customPlot1_m->graph(1)->addData(i, myMethod->bbv[h1h].at(i).BB_U);
+                ui->customPlot1_m->graph(2)->addData(i, myMethod->bbv[h1h].at(i).BB_D);
+                ui->customPlot1_m->graph(3)->addData(i, myMethod->bbv[h1h].at(i).SMA_longa);
+                ui->customPlot1_m->graph(4)->addData(i, myMethod->bbv[h1h].at(i).SMA_curta);
 
-                if(myMethod->fftData[In][harm3].at(i) > maxG3) maxG3 = myMethod->fftData[In][harm3].at(i);
-                if(myMethod->bbv[h3h].at(i).BB_U > maxG3) maxG3 = myMethod->bbv[h3h].at(i).BB_U;
-                if(myMethod->bbv[h3h].at(i).BB_D > maxG3) maxG3 = myMethod->bbv[h3h].at(i).BB_D;
-                if(myMethod->bbv[h3h].at(i).SMA_longa > maxG3) maxG3 = myMethod->bbv[h3h].at(i).SMA_longa;
-                if(myMethod->bbv[h3h].at(i).SMA_curta > maxG3) maxG3 = myMethod->bbv[h3h].at(i).SMA_curta;
-
-                ui->customPlot_m->graph(0)->addData(i, myMethod->fftData[Ia][harm1].at(i));
-                ui->customPlot_m->graph(1)->addData(i, myMethod->fftData[Ib][harm1].at(i));
-                ui->customPlot_m->graph(2)->addData(i, myMethod->fftData[Ic][harm1].at(i));
-
-                ui->customPlot1_m->graph(0)->addData(i, myMethod->fftData[In][harm1].at(i));
-                ui->customPlot1_m->graph(1)->addData(i, myMethod->fftData[In][harm3].at(i));
-                ui->customPlot1_m->graph(2)->addData(i, myMethod->fftData[In][harm5].at(i));
-
-                ui->customPlot2_m->graph(0)->addData(i, myMethod->fftData[In][harm3].at(i));
+                //ui->customPlot2_m->graph(0)->addData(i, myMethod->modulo_predict[h1h].at(i));
+                ui->customPlot2_m->graph(0)->addData(i, myMethod->modulo_predict[h3h].at(i));
                 ui->customPlot2_m->graph(1)->addData(i, myMethod->bbv[h3h].at(i).BB_U);
                 ui->customPlot2_m->graph(2)->addData(i, myMethod->bbv[h3h].at(i).BB_D);
                 ui->customPlot2_m->graph(3)->addData(i, myMethod->bbv[h3h].at(i).SMA_longa);
                 ui->customPlot2_m->graph(4)->addData(i, myMethod->bbv[h3h].at(i).SMA_curta);
-                ui->customPlot2_m->graph(5)->addData(i, myMethod->flags.f3h);
+                //ui->customPlot2_m->graph(5)->addData(i, myMethod->flags.f3h);
                 //ui->customPlot2_m->graph(5)->addData(len, fg);
             }
+            mutex.lock();
+            findMinMax(myMethod->modulo_predict[h1h], qMax(0, len-2000), len, minG1, maxG1);
+            findMinMax(myMethod->modulo_predict[h3h], qMax(0, len-2000), len, minG2, maxG2);
+            mutex.unlock();
+            // Rescale e replot
+            ui->customPlot_m->yAxis->setRange(-0.1, 1.3);
+            ui->customPlot_m->xAxis->setRange(len, 2000, Qt::AlignRight);
+            ui->customPlot1_m->yAxis->setRange(minG1-0.01, maxG1+0.01);
+            ui->customPlot1_m->xAxis->setRange(len, 2000, Qt::AlignRight);
+            ui->customPlot2_m->yAxis->setRange(minG2-0.01, maxG2+0.01);
+            ui->customPlot2_m->xAxis->setRange(len, 2000, Qt::AlignRight);
 
-        // Rescale e replot
-        ui->customPlot_m->yAxis->setRange(0, maxG1);
-        ui->customPlot_m->xAxis->setRange(len, 1000, Qt::AlignRight);
-        ui->customPlot1_m->yAxis->setRange(0, maxG2);
-        ui->customPlot1_m->xAxis->setRange(len, 1000, Qt::AlignRight);
-        ui->customPlot2_m->yAxis->setRange(0, maxG3);
-        ui->customPlot2_m->xAxis->setRange(len, 1000, Qt::AlignRight);
-
-        ui->customPlot_m->replot(); //V
-        ui->customPlot1_m->replot(); //I
-        ui->customPlot2_m->replot(); //IN
+            ui->customPlot_m->replot(); //V
+            ui->customPlot1_m->replot(); //I
+            ui->customPlot2_m->replot(); //IN
         }
 
     }
@@ -760,22 +904,19 @@ MyMethod::MyMethod(QObject *parent, QVector<QVector<float>> *dados, QVector<quin
     K.amostragem = srate;
     K.frequency = freq;
     K.phRef = faseRef;
-    K.P_1h = 120;
-    K.P_3h = 120;
-    K.BB_w1h = 60;
-    K.BB_w3h = 10;
-    K.SMA_curta_w1h = 20;
-    K.SMA_curta_w3h = 5;
+    K.P_1h = 2048;
+    K.P_3h = 2048;
+    K.BB_w1h = 80;
+    K.BB_w3h = 80;
+    K.SMA_curta_w1h = 40;
+    K.SMA_curta_w3h = 40;
 
-    bbv[h1h].resize(121);
-    bbv[h3h].resize(121);
-    for (int i = 0; i < 121; ++i) {
+    bbv[h1h].resize(181);
+    bbv[h3h].resize(181);
+    for (int i = 0; i < 181; ++i) {
         bbv[h1h][i] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
         bbv[h3h][i] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     }
-
-    Buildup.resize(1);
-    porcentagem.resize(121);
 
     // Agora, redimensiona cada vetor interno para FFTLenWindow * amostragem elementos.
     for (int i = 0; i < 2; ++i) {
@@ -798,43 +939,66 @@ MyMethod::MyMethod(QObject *parent, QVector<QVector<float>> *dados, QVector<quin
         }
     }
 
-
-    harmList << 1 << 3 << 5;
-    chList << Ia << Ib << Ic << In << Va << Vb << Vc << Vn;
+    harmList << 1 << 3;
+    chList << In << K.phRef;
 
     flags.f1h=false;
     flags.f3h=false;
-    flags.Var_M_flag_1h = false;
-    flags.Var_B_flag_1h = false;
-    flags.Var_End_flag_1h = false;
-    flags.Var_End_flag_3h = false;
-    flags.Save_buildup_flag = false;
-    flags.Var_BD_flag_3h = false;
-    flags.Var_B_flag_3h = false;
-    flags.flag_capturar_3h = false;
-    flags.var_derivada = false;
+    flags.h1h_lenta = false;
+    flags.h1h_rapida = false;
+    flags.h3h_lenta = false;
+    flags.h3h_rapida = false;
+    flags.var_estavel_direcao_1h = false;
+    flags.var_estavel_amplitude_1h = false;
+    flags.var_abaixo_amplitude_1h = false;
     flags.var_estavel_direcao_3h = false;
     flags.var_estavel_amplitude_3h = false;
     flags.var_abaixo_amplitude_3h = false;
 
-    count.Var_BU_count_1h = 0;
-    count.Var_MM_count_1h = 0;
-    count.count_break_1h = 0;
-    count.flag_1h_position = 0;
-    count.count_break_1h = 0;
-    count.Var_BU_count_3h = 0;
-    count.Position_flag_3h = 0;
-    count.count_BB_abaixo_amplitude = 0;
+    count.h1h_rapida = 0;
+    count.break_1h = 0;
+    count.h3h_rapida = 0;
+    count.t_h1h = 0;
+    count.t_h3h = 0;
+
+}
+void MyMethod::sendDataPy(int x, quint64 ifft, quint64 dataIndex)
+{
+    QVector<float> x1;
+    QVector<float> x2;
+    QVector<float> x3;
+    int p1 = 0;
+    int p3 = 4095;
+    int p = ifft - 4096;
+
+    for (int i = p; i < ifft; i++)
+    {
+        if(i < 0){
+            x1.append(0);
+            x2.append(0);
+            x3.append(0);
+        }else{
+            x1.append(modulo_predict[h1h].at(i));
+            x2.append(modulo_predict[h3h].at(i));
+            x3.append(Angulo_3h_ref1h.at(i));
+        }
+        if(i == count.h1h_position) p1 = x1.size();
+        if(i == count.h3h_position) p3 = x1.size();
+        if (x1.size() >= 4096) break;
+    }
+
+    emit sendPyVector(x, modulo_M[h1h].at(ifft), angulo_M[h1h].at(ifft),
+                      modulo_M[h3h].at(ifft), angulo_M[h3h].at(ifft), x1 , x2, x3, dataIndex, p1, p3);
 
 }
 void MyMethod::onFftTimer()
 {
     static quint64 ifft = 0;
+    static qint64 ena_alg_count = 0;
+    static bool ena_alg = false;
     quint64 dataIndex = *lastDataIndex;
 
     //-------- Calculo do FFT ----------
-
-    //qDebug() << data[Ia].at(dataIndex);
 
     for (int &harmValue : harmList) {
         if (harmValue >= hN) continue;
@@ -848,8 +1012,6 @@ void MyMethod::onFftTimer()
 
         }
     }
-
-
     for (int &harmValue : harmList) {
         if (harmValue >= hN) continue;
         for (int &chValue : chList) {
@@ -867,39 +1029,43 @@ void MyMethod::onFftTimer()
     }
 
     /////////////////////////////////////
-
     //-------- Fasor Medio ----------
-
     if (flags.f1h == 1 || flags.f3h == 1) // for harm1
     {
+        //trigger_flag = true;
         angulo_M[h1h].append(angulo_M[h1h].last());
         modulo_M[h1h].append(modulo_M[h1h].last());
-    }else{
-        QVector<float> result = mediadofasor(fftModulo[In][harm1],
-                                             phaseAngulo[In][harm1],
-                                             modulo_M[h1h].last(),
-                                             angulo_M[h1h].last(),
-                                             K.P_1h);
-        angulo_M[h1h].append(result[0]);
-        modulo_M[h1h].append(result[1]);
-    }
-
-    if (flags.f3h == 1) // for harm3
-    {
         angulo_M[h3h].append(angulo_M[h3h].last());
         modulo_M[h3h].append(modulo_M[h3h].last());
     }else{
-        QVector<float> result = mediadofasor(fftModulo[In][harm3],
-                                             phaseAngulo[In][harm3],
-                                             modulo_M[h3h].last(),
-                                             angulo_M[h3h].last(),
-                                             K.P_3h);
-        angulo_M[h3h].append(result[0]);
-        modulo_M[h3h].append(result[1]);
+        if(trigger_flag){
+            angulo_M[h1h].append(phaseAngulo[In][harm1]);
+            modulo_M[h1h].append(fftModulo[In][harm1]);
+            angulo_M[h3h].append(phaseAngulo[In][harm3]);
+            modulo_M[h3h].append(fftModulo[In][harm3]);
+            trigger_flag = false;
+        }else{
+            QVector<float> result;
+            result = mediadofasor(fftModulo[In][harm1],
+                                                 phaseAngulo[In][harm1],
+                                                 modulo_M[h1h].last(),
+                                                 angulo_M[h1h].last(),
+                                                 K.P_1h);
+            angulo_M[h1h].append(result[0]);
+            modulo_M[h1h].append(result[1]);
+
+            result = mediadofasor(fftModulo[In][harm3],
+                                                 phaseAngulo[In][harm3],
+                                                 modulo_M[h3h].last(),
+                                                 angulo_M[h3h].last(),
+                                                 K.P_3h);
+            angulo_M[h3h].append(result[0]);
+            modulo_M[h3h].append(result[1]);
+        }
+
     }
 
     //------- Fasor Predict ---------------------
-
     QVector<float> result1h = subtraifasor(fftModulo[In][harm1],
                                            phaseAngulo[In][harm1],
                                            modulo_M[h1h].last(),
@@ -916,7 +1082,6 @@ void MyMethod::onFftTimer()
     modulo_predict[h3h].append(result3h[1]);
 
     //------- Angulo referencial
-
     float ang_ref = angulo_predict[h3h].last() - 3*angulo_predict[h1h].last();
 
     while(ang_ref >= 360){
@@ -928,286 +1093,347 @@ void MyMethod::onFftTimer()
     Angulo_3h_ref1h.append(ang_ref);
 
     //-------- Calculo de Medias e Bandas de Boillinger 1h ------------------
+    ena_alg_count++;
+    if (ena_alg_count >= 240) ena_alg = true;
+    else{
+        flags.h1h_lenta = false;
+        flags.h1h_rapida = false;
+        count.h1h_rapida = 0;
+        count.h1h_lenta = 0;
+        ena_alg = false;
+        count.h3h_rapida = 0;
+        count.h3h_rapida = 0;
+        flags.h3h_lenta = false;
+        flags.h3h_rapida = false;
+    }
 
-
-    if (ifft >= 120)
+    if (ifft < 180)
     {
-        //----------------Calcula medias-------------------
-
-        float SMA_longa_aux_1h = 0;
-        for (int j = ifft;j > ifft-K.BB_w1h+1; j--){
-            SMA_longa_aux_1h = SMA_longa_aux_1h + modulo_predict[h1h].at(j);
-        }
-        bbp[h1h].SMA_longa = SMA_longa_aux_1h/K.BB_w1h;
-
-        float SMA_curta_aux_1h = 0;
-        for (int j = ifft; j > ifft-K.SMA_curta_w1h+1; j--){
-            SMA_curta_aux_1h = SMA_curta_aux_1h + modulo_predict[h1h].at(j);
-        }
-        bbp[h1h].SMA_curta = SMA_curta_aux_1h/K.SMA_curta_w1h;
-
-        float aux = 0;
-        for (int j = ifft;j > ifft-K.BB_w1h; j--){
-            aux = aux + qPow(modulo_predict[h1h].at(j) - bbp[h1h].SMA_longa, 2);
-        }
-        bbp[h1h].BB_DP = sqrt(aux/(K.BB_w1h-1));
-
-        bbp[h1h].BB_U = bbp[h1h].SMA_longa + 2*bbp[h1h].BB_DP;
-        bbp[h1h].BB_D = bbp[h1h].SMA_curta - 2*bbp[h1h].BB_DP;
-
-        bbv[h1h].append(bbp[h1h]);
-
-        //-------------Logica--------------------
-
-        if (bbp[h1h].SMA_curta > bbp[h1h].SMA_longa && bbp[h1h].SMA_curta >= 0.01){
-            count.Var_MM_count_1h = count.Var_MM_count_1h + 1;
-            if (count.Var_MM_count_1h > 60){
-                flags.Var_M_flag_1h = true;
-                Buildup_temp.append(bbp[h1h].SMA_longa);
-            }
-        }else{
-            if (flags.Var_M_flag_1h == true && flags.Save_buildup_flag == true){
-                Buildup = Buildup_temp;
-                if (Buildup.size() > 10){
-                    flags.Save_buildup_flag = false;
-                }
-            }
-            flags.Var_M_flag_1h = false;
-            count.Var_MM_count_1h = 0;
-        }
-
-        if (modulo_predict[h1h].last() > bbp[h1h].BB_U && modulo_predict[h1h].last() >= 0.01){
-            count.Var_BU_count_1h = count.Var_BU_count_1h + 1;
-            if (count.Var_BU_count_1h > 3){
-                flags.Var_B_flag_1h = true;
-            }
-        }else{
-            count.Var_BU_count_1h = 0;
-            flags.Var_B_flag_1h = false;
-        }
-
-        if ((flags.Var_B_flag_1h == true || flags.Var_M_flag_1h == true) && flags.f1h == false){
-            flags.f1h = true;
-            count.flag_1h_position = ifft;
-            BB_U_1h_prev = bbv[h1h].at(ifft-K.BB_w1h).BB_U;
-            BB_D_1h_prev = bbv[h1h].at(ifft-K.BB_w1h).BB_D;
-        }
-
-        //flag_1h_V(i) = flag_1h;
-
-
-        if (flags.f1h == true){
-
-            float var_estabilidade_1h = ((bbp[h1h].BB_U - bbp[h1h].BB_D) - (bbv[h1h].at(ifft-K.BB_w1h).BB_U
-                                          - bbv[h1h].at(ifft-K.BB_w1h).BB_D)) / (bbp[h1h].BB_U-bbp[h1h].BB_D);
-
-            float var_test_1h = ((bbp[h1h].BB_U-bbp[h1h].BB_D) - (BB_U_1h_prev-BB_D_1h_prev) ) / (bbp[h1h].BB_U-bbp[h1h].BB_D);
-            float var_test2_1h = abs(1-(bbp[h1h].SMA_longa/bbv[h1h].at(ifft-K.BB_w1h).SMA_longa));
-
-            if(var_estabilidade_1h < 0.2 && var_test_1h < 0.5 && var_test2_1h < 0.1){
-                count.count_break_1h = count.count_break_1h + 1;
-                if (count.count_break_1h >= 10  && bbp[h1h].SMA_curta < bbp[h1h].SMA_longa){
-                    flags.Var_End_flag_1h = true;
-                    //                     flag_1h = 0;
-                }
-            }else{
-                count.count_break_1h = 0;
-            }
-            //Var_End_flagM_1h(i) = Var_End_flag_1h;
-        }else{
-            //Var_End_flagM_1h(i) = 0;
-        }
-
+        ifft++;
+        return;
     }
 
+    //-----------------------------------------------------
+    static float BB_U_min_prev_1h = 0;
+    static float BB_U_max_prev_1h = 0;
+    static float BB_D_min_prev_1h = 0;
+    static float BB_D_max_prev_1h = 0;
+    static float SMA_longa_min_prev_1h = 0;
+    static float SMA_longa_max_prev_1h = 0;
+    static float BB_U_min_1h = 0;
+    static float BB_U_max_1h = 0;
+    static float BB_D_min_1h = 0;
+    static float BB_D_max_1h = 0;
+    static float SMA_longa_min_1h = 0;
+    static float SMA_longa_max_1h = 0;
 
-    //-------- Calculo de Medias e Bandas de Boillinger 3h ------------------
+    static float BB_U_min_prev_3h = 0;
+    static float BB_U_max_prev_3h = 0;
+    static float BB_D_min_prev_3h = 0;
+    static float BB_D_max_prev_3h = 0;
+    static float SMA_longa_min_prev_3h = 0;
+    static float SMA_longa_max_prev_3h = 0;
+    static float BB_U_min = 0;
+    static float BB_U_max = 0;
+    static float BB_D_min = 0;
+    static float BB_D_max = 0;
+    static float SMA_longa_min = 0;
+    static float SMA_longa_max = 0;
+    //----------------Calcula medias 1h-------------------
 
+    float SMA_longa_aux_1h = 0;
+    for (int j = ifft;j >= ifft-K.BB_w1h+1; j--){
+        SMA_longa_aux_1h = SMA_longa_aux_1h + modulo_predict[h1h].at(j);
+    }
+    bbp[h1h].SMA_longa = SMA_longa_aux_1h/K.BB_w1h;
+    float SMA_curta_aux_1h = 0;
+    for (int j = ifft; j >= ifft-K.SMA_curta_w1h+1; j--){
+        SMA_curta_aux_1h = SMA_curta_aux_1h + modulo_predict[h1h].at(j);
+    }
+    bbp[h1h].SMA_curta = SMA_curta_aux_1h/K.SMA_curta_w1h;
+    float aux = 0;
+    for (int j = ifft;j > ifft-K.BB_w1h; j--){
+        aux = aux + qPow(modulo_predict[h1h].at(j) - bbp[h1h].SMA_longa, 2);
+    }
+    bbp[h1h].BB_DP = sqrt(aux/(K.BB_w1h-1));
+    bbp[h1h].BB_U = bbp[h1h].SMA_longa + 2*bbp[h1h].BB_DP;
+    bbp[h1h].BB_D = bbp[h1h].SMA_curta - 2*bbp[h1h].BB_DP;
+    bbv[h1h].append(bbp[h1h]);
 
-    if (ifft > 120)
+    //-------------Logica--------------------
+
+    if (bbp[h1h].BB_D > (bbp[h1h].BB_U-bbp[h1h].BB_D) &&
+        bbp[h1h].SMA_curta > bbp[h1h].SMA_longa &&
+        bbp[h1h].SMA_longa > bbv[h1h].at(ifft-60).SMA_longa &&
+        bbp[h1h].SMA_curta >= 0.05)
     {
-        static float SMA_curta_V_3hLast = 0;
-
-        static float BB_U_max_prev_3h = 0;
-        static float BB_D_min_prev_3h = 0;
-
-
-        //----------------Calcula medias-------------------
-
-        float SMA_longa_aux_3h = 0;
-        for (int j = ifft;j > ifft-K.BB_w3h+1; j--){
-            SMA_longa_aux_3h = SMA_longa_aux_3h + modulo_predict[h3h].at(j);
-        }
-        bbp[h3h].SMA_longa = SMA_longa_aux_3h/K.BB_w3h;
-
-        float SMA_curta_aux_3h = 0;
-        for (int j = ifft;j > ifft-K.SMA_curta_w3h+1; j--){
-            SMA_curta_aux_3h = SMA_curta_aux_3h + modulo_predict[h3h].at(j);
-        }
-        bbp[h3h].SMA_curta = SMA_curta_aux_3h/K.SMA_curta_w3h;
-
-        X_Der_M_curta3h = bbp[h3h].SMA_curta - SMA_curta_V_3hLast;
-        SMA_curta_V_3hLast = bbp[h3h].SMA_curta;
-
-        float aux = 0;
-        for (int j = ifft;j > ifft-K.BB_w3h; j--){
-            aux = aux + qPow(modulo_predict[h3h].at(j) - bbp[h3h].SMA_longa, 2);
-        }
-        bbp[h3h].BB_DP = sqrt(aux/(K.BB_w3h-1));
-
-        bbp[h3h].BB_U = bbp[h3h].SMA_longa + 2*bbp[h3h].BB_DP;
-        bbp[h3h].BB_D = bbp[h3h].SMA_longa - 2*bbp[h3h].BB_DP;
-
-        bbv[h3h].append(bbp[h3h]);
-
-        float BB_soma = 0;
-        for (int j = ifft;j > ifft-60+1; j--){
-            BB_soma = BB_soma + bbv[h3h].at(j).BB_DP;
-        }
-        BB_sdp_Media.append(BB_soma/60);
-
-        //------------------------------------------
-
-        if (bbp[h3h].BB_D > ( bbp[h3h].BB_U-bbp[h3h].BB_D ) && bbp[h3h].SMA_curta >= 0.01 ){
-            flags.Var_BD_flag_3h = true;
-            //Var_BD_flag_3_V(i) = 0.8;
-        }else{
-            flags.Var_BD_flag_3h = false;
-        }
-
-        if (modulo_predict[harm3].last() > bbp[h3h].BB_U && bbp[h3h].SMA_curta >= 0.01){
-            count.Var_BU_count_3h = count.Var_BU_count_3h + 1;
-            if (count.Var_BU_count_3h > 3){
-                flags.Var_B_flag_3h = true;
-                //Var_B_flag_3h_V(i) = 0.9;
-            }
-        }else{
-            count.Var_BU_count_3h = 0;
-            flags.Var_B_flag_3h = 0;
-        }
-
-        if ((flags.Var_B_flag_3h || flags.Var_BD_flag_3h) && flags.f3h == false && ifft > 180 && flags.flag_capturar_3h == false){
-            flags.f3h = true;
-            flags.flag_capturar_3h = true;
-            count.Position_flag_3h = ifft;
-            count.count_BB_abaixo_amplitude = 0;
-
-            float BB_U_min_prev_3h = bbp[h3h].BB_U;
-            float BB_U_max_prev_3h = bbp[h3h].BB_U;
-            float BB_D_min_prev_3h = bbp[h3h].BB_D;
-            float BB_D_max_prev_3h = bbp[h3h].BB_D;
-            float SMA_longa_min_prev_3h = bbp[h3h].SMA_longa;
-            float SMA_longa_max_prev_3h = bbp[h3h].SMA_longa;
-
-            for (int j = ifft; j > ifft-60; j--){
-                if (BB_U_min_prev_3h > bbv[h3h].at(j).BB_U)
-                    BB_U_min_prev_3h = bbv[h3h].at(j).BB_U;
-                if (BB_U_max_prev_3h < bbv[h3h].at(j).BB_U)
-                    BB_U_max_prev_3h = bbv[h3h].at(j).BB_U;
-                if (BB_D_min_prev_3h > bbv[h3h].at(j).BB_D)
-                    BB_D_min_prev_3h = bbv[h3h].at(j).BB_D;
-                if (BB_D_max_prev_3h < bbv[h3h].at(j).BB_D)
-                    BB_D_max_prev_3h = bbv[h3h].at(j).BB_D;
-                if (SMA_longa_min_prev_3h > bbv[h3h].at(j).SMA_longa)
-                    SMA_longa_min_prev_3h = bbv[h3h].at(j).SMA_longa;
-                if (SMA_longa_max_prev_3h < bbv[h3h].at(j).SMA_longa)
-                    SMA_longa_max_prev_3h = bbv[h3h].at(j).SMA_longa;
-            }
-
-        }
-
-        //flag_3h_V(i) = flag_3h;
-        //flag_efetivo_3h_V(i) = flag_3h;
-        float tmax_flag_3h = 0;
-
-        if (flags.f3h){
-            tmax_flag_3h = tmax_flag_3h + 1;
-
-            //if (X_Der_M_curta3h > 0.1) flags.var_derivada = true;
-
-            float BB_U_min = bbp[h3h].BB_U;
-            float BB_U_max = bbp[h3h].BB_U;
-            float BB_D_min = bbp[h3h].BB_D;
-            float BB_D_max = bbp[h3h].BB_D;
-            float SMA_longa_min = bbp[h3h].SMA_longa;
-            float SMA_longa_max = bbp[h3h].SMA_longa;
-
-            for (int j = ifft; j > ifft-150; j--){
-                if (BB_U_min > bbv[h3h].at(j).BB_U)
-                    BB_U_min = bbv[h3h].at(j).BB_U;
-                if (BB_U_max < bbv[h3h].at(j).BB_U)
-                    BB_U_max = bbv[h3h].at(j).BB_U;
-                if (BB_D_min > bbv[h3h].at(j).BB_D)
-                    BB_D_min = bbv[h3h].at(j).BB_D;
-                if (BB_D_max < bbv[h3h].at(j).BB_D)
-                    BB_D_max = bbv[h3h].at(j).BB_D;
-                if (SMA_longa_min > bbv[h3h].at(j).SMA_longa)
-                    SMA_longa_min = bbv[h3h].at(j).SMA_longa;
-                if (SMA_longa_max < bbv[h3h].at(j).SMA_longa)
-                    SMA_longa_max = bbv[h3h].at(j).SMA_longa;
-            }
-
-            if (SMA_longa_max < BB_U_min && SMA_longa_min > BB_D_max){
-                flags.var_estavel_direcao_3h = true;
-                //var_estavel_direcao_3h_V(i) = 1.2;
-            }else{
-                flags.var_estavel_direcao_3h = false;
-            }
-
-            if ( (BB_U_max-BB_D_min) < 2*(BB_U_max_prev_3h-BB_D_min_prev_3h) ){
-                flags.var_estavel_amplitude_3h = true;
-                //var_estavel_amplitude_3h_V(i) = 1.1;
-            }else{
-                flags.var_estavel_amplitude_3h = false;
-            }
-            //qDebug() << BB_U_max << BB_D_min;
-            if ( (BB_U_max-BB_D_min) < 0.01 ){
-                flags.var_abaixo_amplitude_3h = true;
-                //var_estavel_amplitude_3h_V(i) = 1.3;
-            }else{
-                flags.var_abaixo_amplitude_3h = false;
-            }
-
-
-            if( (flags.var_estavel_direcao_3h && flags.var_estavel_amplitude_3h) || flags.var_abaixo_amplitude_3h || tmax_flag_3h>1200 || flags.var_derivada ){
-                flags.Var_End_flag_3h = true;
-                //Var_End_flagM_3h(i) = 1;
-                flags.f3h = false;
-                //qDebug() << BB_U_max << BB_D_min << ifft;
-                //qDebug() << flags.var_estavel_direcao_3h << flags.var_estavel_amplitude_3h << flags.var_abaixo_amplitude_3h << tmax_flag_3h << flags.var_derivada;
-                //if (Position_flag_3h_end == FT_si){
-                //     Position_flag_3h_end = i-10;
-                // }
-                QVector<float> x;
-                for (int i = count.Position_flag_3h; i < ifft; i++)
-                {
-                    x.append(modulo_predict[h3h].at(i));
-                }
-                emit sendPyVector(x);
-            }
-
-        }else{
-            //Var_End_flagM_3h(i) = 0;
-        }
-        //if (flags.Var_End_flag_3h == 1) flag_efetivo_3h_V = 0;
-
+        if (count.h1h_lenta >= 10) flags.h1h_lenta = true;
+        else count.h1h_lenta++;
+    }
+    else
+    {
+        count.h1h_lenta = 0;
+        flags.h1h_lenta = false;
     }
 
-    //-------- Calculo da porcentagem -------------------
-
-    if (modulo_predict[h1h].last() > 0.1){
-        porcentagem.append(100*modulo_predict[h3h].last()/modulo_predict[h1h].last());
-        //ref_porc(i) = 3;
-    }else{
-        porcentagem.append(0);
-        //ref_porc(i) = 3;
-        //if (Var_End_flag_3h == 1) Porcentagem(i-11) = 0;
+    if (modulo_predict[h1h].last() > bbp[h1h].BB_U &&
+        modulo_predict[h1h].last() >= 0.05)
+    {
+        if (count.h1h_rapida >= 2) flags.h1h_rapida = true;
+        else count.h1h_rapida++;
+    }
+    else
+    {
+        count.h1h_rapida = 0;
+        flags.h1h_rapida = false;
     }
 
+    if ((flags.h1h_rapida == true || flags.h1h_lenta == true || flags.f3h) &&
+        flags.f1h == false &&
+        ena_alg)
+    {
+        flags.f1h = true;
+        count.h1h_position = ifft;
+
+        BB_U_min_prev_1h = bbp[h1h].BB_U;
+        BB_U_max_prev_1h = bbp[h1h].BB_U;
+        BB_D_min_prev_1h = bbp[h1h].BB_D;
+        BB_D_max_prev_1h = bbp[h1h].BB_D;
+        SMA_longa_min_prev_1h = bbp[h1h].SMA_longa;
+        SMA_longa_max_prev_1h = bbp[h1h].SMA_longa;
+
+        for (int j = ifft-60; j > ifft-180; j--){
+            if (BB_U_min_prev_1h > bbv[h1h].at(j).BB_U)
+                BB_U_min_prev_1h = bbv[h1h].at(j).BB_U;
+            if (BB_U_max_prev_1h < bbv[h1h].at(j).BB_U)
+                BB_U_max_prev_1h = bbv[h1h].at(j).BB_U;
+            if (BB_D_min_prev_1h > bbv[h1h].at(j).BB_D)
+                BB_D_min_prev_1h = bbv[h1h].at(j).BB_D;
+            if (BB_D_max_prev_1h < bbv[h1h].at(j).BB_D)
+                BB_D_max_prev_1h = bbv[h1h].at(j).BB_D;
+            if (SMA_longa_min_prev_1h > bbv[h1h].at(j).SMA_longa)
+                SMA_longa_min_prev_1h = bbv[h1h].at(j).SMA_longa;
+            if (SMA_longa_max_prev_1h < bbv[h1h].at(j).SMA_longa)
+                SMA_longa_max_prev_1h = bbv[h1h].at(j).SMA_longa;
+        }
+    }
+
+    if (flags.f1h)
+    {
+        count.t_h1h++;
+
+        BB_U_min_1h = bbp[h1h].BB_U;
+        BB_U_max_1h = bbp[h1h].BB_U;
+        BB_D_min_1h = bbp[h1h].BB_D;
+        BB_D_max_1h = bbp[h1h].BB_D;
+        SMA_longa_min_1h = bbp[h1h].SMA_longa;
+        SMA_longa_max_1h = bbp[h1h].SMA_longa;
+
+        for (int j = ifft; j > ifft-180; j--){
+            if (BB_U_min_1h > bbv[h1h].at(j).BB_U)
+                BB_U_min_1h = bbv[h1h].at(j).BB_U;
+            if (BB_U_max_1h < bbv[h1h].at(j).BB_U)
+                BB_U_max_1h = bbv[h1h].at(j).BB_U;
+            if (BB_D_min_1h > bbv[h1h].at(j).BB_D)
+                BB_D_min_1h = bbv[h1h].at(j).BB_D;
+            if (BB_D_max_1h < bbv[h1h].at(j).BB_D)
+                BB_D_max_1h = bbv[h1h].at(j).BB_D;
+            if (SMA_longa_min_1h > bbv[h1h].at(j).SMA_longa)
+                SMA_longa_min_1h = bbv[h1h].at(j).SMA_longa;
+            if (SMA_longa_max_1h < bbv[h1h].at(j).SMA_longa)
+                SMA_longa_max_1h = bbv[h1h].at(j).SMA_longa;
+        }
+
+        if (SMA_longa_max_1h < BB_U_min_1h && SMA_longa_min_1h > BB_D_max_1h)
+             flags.var_estavel_direcao_1h = true;
+        else flags.var_estavel_direcao_1h = false;
+
+        if ((BB_U_max_1h-BB_D_min_1h) < 2*(BB_U_max_prev_1h-BB_D_min_prev_1h))
+             flags.var_estavel_amplitude_1h = true;
+        else flags.var_estavel_amplitude_1h = false;
+
+        if ((BB_U_max_1h-BB_D_min_1h) < 0.04 )
+             flags.var_abaixo_amplitude_1h = true;
+        else flags.var_abaixo_amplitude_1h = false;
+
+        if(((flags.var_estavel_direcao_1h && flags.var_estavel_amplitude_1h) || flags.var_abaixo_amplitude_1h) ||
+            (count.t_h1h>=3072 && flags.f3h == false))
+        {
+            // qDebug() << SMA_longa_max_1h << BB_U_min_1h << SMA_longa_min_1h << BB_D_max_1h;
+            // qDebug() << flags.var_estavel_direcao_1h;
+            // qDebug() << BB_U_max_1h << BB_D_min_1h << BB_U_max_prev_1h << BB_D_min_prev_1h;
+            // qDebug() << flags.var_estavel_amplitude_1h;
+            // qDebug() << BB_U_max_1h << BB_D_min_1h;
+            // qDebug() << flags.var_abaixo_amplitude_1h;
+
+            count.break_1h++;
+            if ((count.break_1h>=20 && bbp[h1h].SMA_curta<bbp[h1h].SMA_longa && count.t_h1h>=1024 && flags.f3h == false) ||
+                (count.t_h1h>=3072 && flags.f3h == false))
+            {
+                flags.f1h = false;
+                ena_alg_count = 0;
+                count.break_1h = 0;
+                count.t_h1h = 0;
+
+                sendDataPy(1, ifft, dataIndex);
+            }
+        }
+        else
+        {
+            count.break_1h = 0;
+        }
+    }
+    else
+    {
+        count.t_h1h = 0;
+    }
+
+
+
+    //----------------Calcula medias-------------------
+
+    float SMA_longa_aux_3h = 0;
+    for (int j = ifft;j >= ifft-K.BB_w3h+1; j--){
+        SMA_longa_aux_3h = SMA_longa_aux_3h + modulo_predict[h3h].at(j);
+    }
+    bbp[h3h].SMA_longa = SMA_longa_aux_3h/K.BB_w3h;
+    float SMA_curta_aux_3h = 0;
+    for (int j = ifft;j >= ifft-K.SMA_curta_w3h+1; j--){
+        SMA_curta_aux_3h = SMA_curta_aux_3h + modulo_predict[h3h].at(j);
+    }
+    bbp[h3h].SMA_curta = SMA_curta_aux_3h/K.SMA_curta_w3h;
+    float aux1 = 0;
+    for (int j = ifft;j > ifft-K.BB_w3h; j--){
+        aux1 = aux1 + qPow(modulo_predict[h3h].at(j) - bbp[h3h].SMA_longa, 2);
+    }
+    bbp[h3h].BB_DP = sqrt(aux1/(K.BB_w3h-1));
+    bbp[h3h].BB_U = bbp[h3h].SMA_longa + 2*bbp[h3h].BB_DP;
+    bbp[h3h].BB_D = bbp[h3h].SMA_longa - 2*bbp[h3h].BB_DP;
+    bbv[h3h].append(bbp[h3h]);
+
+    //------------------------------------------
+
+    if (bbp[h3h].BB_D > ( bbp[h3h].BB_U-bbp[h3h].BB_D ) &&
+        bbp[h3h].SMA_curta > bbp[h3h].SMA_longa &&
+        bbp[h3h].SMA_longa > bbv[h3h].at(ifft-60).SMA_longa &&
+        bbp[h3h].SMA_curta >= 0.025 )
+    {
+        if (count.h3h_lenta >= 10) flags.h3h_lenta = true;
+        else count.h3h_lenta++;
+    }
+    else
+    {
+        count.h3h_lenta = 0;
+        flags.h3h_lenta = false;
+    }
+
+    if (modulo_predict[h3h].last() > bbp[h3h].BB_U &&
+        bbp[h3h].SMA_curta >= 0.025)
+    {
+        //qDebug() << modulo_predict[h3h].last() << bbp[h3h].BB_U;
+        if (count.h3h_rapida >= 3) flags.h3h_rapida = true;
+        else count.h3h_rapida++;
+    }
+    else
+    {
+        count.h3h_rapida = 0;
+        flags.h3h_rapida = false;
+    }
+
+    if ((flags.h3h_lenta || flags.h3h_rapida) &&
+        flags.f3h == false &&
+        ifft > 600 &&
+        ena_alg)
+    {
+        // qDebug() << flags.h3h_lenta << flags.h3h_rapida;
+
+        flags.f3h = true;
+
+        flags.h3h_lenta = false;
+        flags.h3h_rapida = false;
+
+        count.h3h_position = ifft;
+
+        BB_U_min_prev_3h = bbp[h3h].BB_U;
+        BB_U_max_prev_3h = bbp[h3h].BB_U;
+        BB_D_min_prev_3h = bbp[h3h].BB_D;
+        BB_D_max_prev_3h = bbp[h3h].BB_D;
+        SMA_longa_min_prev_3h = bbp[h3h].SMA_longa;
+        SMA_longa_max_prev_3h = bbp[h3h].SMA_longa;
+
+        for (int j = ifft-60; j > ifft-180; j--){
+            if (BB_U_min_prev_3h > bbv[h3h].at(j).BB_U)
+                BB_U_min_prev_3h = bbv[h3h].at(j).BB_U;
+            if (BB_U_max_prev_3h < bbv[h3h].at(j).BB_U)
+                BB_U_max_prev_3h = bbv[h3h].at(j).BB_U;
+            if (BB_D_min_prev_3h > bbv[h3h].at(j).BB_D)
+                BB_D_min_prev_3h = bbv[h3h].at(j).BB_D;
+            if (BB_D_max_prev_3h < bbv[h3h].at(j).BB_D)
+                BB_D_max_prev_3h = bbv[h3h].at(j).BB_D;
+            if (SMA_longa_min_prev_3h > bbv[h3h].at(j).SMA_longa)
+                SMA_longa_min_prev_3h = bbv[h3h].at(j).SMA_longa;
+            if (SMA_longa_max_prev_3h < bbv[h3h].at(j).SMA_longa)
+                SMA_longa_max_prev_3h = bbv[h3h].at(j).SMA_longa;
+        }
+    }
+
+    if (flags.f3h)
+    {
+        count.t_h3h++;
+
+        BB_U_min = bbp[h3h].BB_U;
+        BB_U_max = bbp[h3h].BB_U;
+        BB_D_min = bbp[h3h].BB_D;
+        BB_D_max = bbp[h3h].BB_D;
+        SMA_longa_min = bbp[h3h].SMA_longa;
+        SMA_longa_max = bbp[h3h].SMA_longa;
+
+        for (int j = ifft; j > ifft-180; j--){
+            if (BB_U_min > bbv[h3h].at(j).BB_U)
+                BB_U_min = bbv[h3h].at(j).BB_U;
+            if (BB_U_max < bbv[h3h].at(j).BB_U)
+                BB_U_max = bbv[h3h].at(j).BB_U;
+            if (BB_D_min > bbv[h3h].at(j).BB_D)
+                BB_D_min = bbv[h3h].at(j).BB_D;
+            if (BB_D_max < bbv[h3h].at(j).BB_D)
+                BB_D_max = bbv[h3h].at(j).BB_D;
+            if (SMA_longa_min > bbv[h3h].at(j).SMA_longa)
+                SMA_longa_min = bbv[h3h].at(j).SMA_longa;
+            if (SMA_longa_max < bbv[h3h].at(j).SMA_longa)
+                SMA_longa_max = bbv[h3h].at(j).SMA_longa;
+        }
+
+        if (SMA_longa_max < BB_U_min && SMA_longa_min > BB_D_max)
+             flags.var_estavel_direcao_3h = true;
+        else flags.var_estavel_direcao_3h = false;
+
+        if ((BB_U_max-BB_D_min) < 2*(BB_U_max_prev_3h-BB_D_min_prev_3h))
+             flags.var_estavel_amplitude_3h = true;
+        else flags.var_estavel_amplitude_3h = false;
+
+        if ((BB_U_max-BB_D_min) < 0.04)
+             flags.var_abaixo_amplitude_3h = true;
+        else flags.var_abaixo_amplitude_3h = false;
+
+        if(((((flags.var_estavel_direcao_3h && flags.var_estavel_amplitude_3h) || flags.var_abaixo_amplitude_3h) &&
+              count.break_1h >= 20) || count.t_h1h>=3072 || count.t_h3h>=3072) && count.t_h3h>=1024)
+        {
+            ena_alg_count = 0;
+            flags.f3h = false;
+            flags.f1h = false;
+            flags.var_estavel_direcao_3h = false;
+            flags.var_estavel_amplitude_3h = false;
+            flags.var_abaixo_amplitude_3h = false;
+
+            sendDataPy(2, ifft, dataIndex);
+        }
+    }
+    else
+    {
+        count.t_h3h = 0;
+    }
 
     ifft++;
-
-    //qDebug() << countSs;
 }
 void MyMethod::run()
 {
@@ -1362,6 +1588,12 @@ float MyMethod::mediadafase(float phase, float faseM, float divisor){
 
     return conv_m;
 }
+
+
+
+
+
+
 
 
 
